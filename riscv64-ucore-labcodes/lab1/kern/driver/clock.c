@@ -38,12 +38,31 @@ void clock_init(void) {
     // divided by 500 when using Spike(2MHz)
     // divided by 100 when using QEMU(10MHz)
     // timebase = sbi_timebase() / 500;
+    cprintf("++ setup illegal instruction\n");
     clock_set_next_event();
-
+    //添加异常指令
+    __asm__ __volatile__(
+        "mret"
+    );
+    __asm__ __volatile__(
+        "nop"
+    ); 
+    cprintf("++ setup breakpoint \n");
+    //添加断点异常
+    __asm__ __volatile__(
+        "ebreak"
+    );       
+    __asm__ __volatile__(
+        "nop"
+    ); 
     // initialize time counter 'ticks' to zero
     ticks = 0;
 
     cprintf("++ setup timer interrupts\n");
 }
 
-void clock_set_next_event(void) { sbi_set_timer(get_cycles() + timebase); }
+void clock_set_next_event(void) { 
+
+
+    sbi_set_timer(get_cycles() + timebase); 
+}
