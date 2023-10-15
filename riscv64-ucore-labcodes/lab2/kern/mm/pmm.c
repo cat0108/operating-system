@@ -1,5 +1,6 @@
 #include <default_pmm.h>
 #include <best_fit_pmm.h>
+#include <buddy_pmm.h>
 #include <defs.h>
 #include <error.h>
 #include <memlayout.h>
@@ -11,11 +12,13 @@
 #include <../sync/sync.h>
 #include <riscv.h>
 
+// 第一个能被分配的物理页页号（用于buddy system中寻找伙伴块）
+ppn_t first_ppn = 0;
 // virtual address of physical page array
 struct Page *pages;
 // amount of physical memory (in pages)
-size_t npage = 0;
 // the kernel image is mapped at VA=KERNBASE and PA=info.base
+size_t npage = 0;
 uint64_t va_pa_offset;
 // memory starts at 0x80000000 in RISC-V
 // DRAM_BASE defined in riscv.h as 0x80000000
@@ -34,7 +37,7 @@ static void check_alloc_page(void);
 
 // init_pmm_manager - initialize a pmm_manager instance
 static void init_pmm_manager(void) {
-    pmm_manager = &best_fit_pmm_manager;
+    pmm_manager = &buddy_pmm_manager;
     cprintf("memory management: %s\n", pmm_manager->name);
     pmm_manager->init();
 }
@@ -98,19 +101,24 @@ static void page_init(void) {
     }
 
     extern char end[];
-
+    cprintf("the end of kernel: %p\n", end);
     npage = maxpa / PGSIZE;
+    
     //kernel在end[]结束, pages是剩下的页的开始
     pages = (struct Page *)ROUNDUP((void *)end, PGSIZE);
-
+    cprintf("pages begin addr: %p\n", pages);
+    //一 开 始 把 所 有 页 面 都 设 置 为 保 留 给 内 核 使 用 的 ， 之 后 再 设 置 哪 些 页 面 可 以 分 配 给 其 他 程 序
     for (size_t i = 0; i < npage - nbase; i++) {
         SetPageReserved(pages + i);
     }
-
+    //存pages结构体
     uintptr_t freemem = PADDR((uintptr_t)pages + sizeof(struct Page) * (npage - nbase));
-
     mem_begin = ROUNDUP(freemem, PGSIZE);
+    cprintf("mem begin addr: %p\n", mem_begin);
     mem_end = ROUNDDOWN(mem_end, PGSIZE);
+    cprintf("mem end addr: %p\n", mem_end);
+    //第一个能被分配的物理页页号（用于buddy system中寻找伙伴块）
+    first_ppn = page2ppn(pa2page(mem_begin));
     if (freemem < mem_end) {
         init_memmap(pa2page(mem_begin), (mem_end - mem_begin) / PGSIZE);
     }

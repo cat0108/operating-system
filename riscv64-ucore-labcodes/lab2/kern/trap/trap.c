@@ -8,6 +8,7 @@
 #include <riscv.h>
 #include <stdio.h>
 #include <trap.h>
+#include<sbi.h>//鸡贼！不帮我写
 
 #define TICK_NUM 100
 
@@ -23,12 +24,13 @@ static void print_ticks() {
  */
 void idt_init(void) {
     /* LAB1 YOUR CODE : STEP 2 */
+    
     /* (1) Where are the entry addrs of each Interrupt Service Routine (ISR)?
      *     All ISR's entry addrs are stored in __vectors. where is uintptr_t
      * __vectors[] ?
      *     __vectors[] is in kern/trap/vector.S which is produced by
      * tools/vector.c
-     *     (try "make" command in lab1, then you will find vector.S in kern/trap
+     *     (try "make" command in , then you will find vector.S in kern/trap
      * DIR)
      *     You can use  "extern uintptr_t __vectors[];" to define this extern
      * variable which will be used later.
@@ -125,10 +127,17 @@ void interrupt_handler(struct trapframe *tf) {
             // directly.
             // cprintf("Supervisor timer interrupt\n");
             // clear_csr(sip, SIP_STIP);
+            /*(1)设置下次时钟中断- clock_set_next_event()
+             *(2)计数器（ticks）加一
+             *(3)当计数器加到100的时候，我们会输出一个`100ticks`表示我们触发了100次时钟中断，同时打印次数（num）加一
+            * (4)判断打印次数，当打印次数为10时，调用<sbi.h>中的关机函数关机
+            */
             clock_set_next_event();
-            if (++ticks % TICK_NUM == 0) {
+            ticks++;
+            if(ticks % TICK_NUM==0)
                 print_ticks();
-            }
+            if(ticks / TICK_NUM == 10)
+                sbi_shutdown();
             break;
         case IRQ_H_TIMER:
             cprintf("Hypervisor software interrupt\n");

@@ -106,6 +106,8 @@ static inline struct Page *pa2page(uintptr_t pa) {
     if (PPN(pa) >= npage) {
         panic("pa2page called with invalid pa");
     }
+    //pages为开始存储Page结构体的数组的起始位置
+    //返回在page结构体中的偏移量(第几个page)
     return &pages[PPN(pa) - nbase];
 }
 static inline void flush_tlb() { asm volatile("sfence.vm"); }

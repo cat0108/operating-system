@@ -59,32 +59,45 @@ free_area_t free_area;
 #define nr_free (free_area.nr_free)
 
 static void
+//初始化list，并设置number of free pages =0
 default_init(void) {
     list_init(&free_list);
     nr_free = 0;
 }
 
+//初始化page并插入到free_list中
 static void
 default_init_memmap(struct Page *base, size_t n) {
     assert(n > 0);
     struct Page *p = base;
+    //结构体数组遍历
     for (; p != base + n; p ++) {
         assert(PageReserved(p));
+        //初始化page中字段，flags=0，property先统一设为0
         p->flags = p->property = 0;
+        //page->ref=0
         set_page_ref(p, 0);
     }
+    //block的第一个page的property=n
     base->property = n;
+    //设置base->flags中的PG_property位为1
     SetPageProperty(base);
+    //number of free pages +=n
     nr_free += n;
+    //只插入这个block的第一个page：base
     if (list_empty(&free_list)) {
         list_add(&free_list, &(base->page_link));
     } else {
         list_entry_t* le = &free_list;
+        //双向循环链表，last->next=first,遍历整个链表
         while ((le = list_next(le)) != &free_list) {
+        //le2page宏定义在memlayout.h中，将list_entry_t转换为struct Page
             struct Page* page = le2page(le, page_link);
+            //默认采用前插法，插到第一个比base大的page前面
             if (base < page) {
                 list_add_before(le, &(base->page_link));
                 break;
+            //如果base是最大的page，插到最后
             } else if (list_next(le) == &free_list) {
                 list_add(le, &(base->page_link));
             }
@@ -102,6 +115,7 @@ default_alloc_pages(size_t n) {
     list_entry_t *le = &free_list;
     while ((le = list_next(le)) != &free_list) {
         struct Page *p = le2page(le, page_link);
+        //first fit的体现
         if (p->property >= n) {
             page = p;
             break;
@@ -110,13 +124,16 @@ default_alloc_pages(size_t n) {
     if (page != NULL) {
         list_entry_t* prev = list_prev(&(page->page_link));
         list_del(&(page->page_link));
+        //如果这个block的大小大于n，就将剩余的部分重新插入到free_list中
         if (page->property > n) {
             struct Page *p = page + n;
+            //需要重写property
             p->property = page->property - n;
             SetPageProperty(p);
             list_add(prev, &(p->page_link));
         }
         nr_free -= n;
+        //被分配，PG_property=0
         ClearPageProperty(page);
     }
     return page;
@@ -127,6 +144,7 @@ default_free_pages(struct Page *base, size_t n) {
     assert(n > 0);
     struct Page *p = base;
     for (; p != base + n; p ++) {
+        //p没有被保留，且被分配
         assert(!PageReserved(p) && !PageProperty(p));
         p->flags = 0;
         set_page_ref(p, 0);
@@ -150,6 +168,7 @@ default_free_pages(struct Page *base, size_t n) {
         }
     }
 
+    //合并前一个空闲block
     list_entry_t* le = list_prev(&(base->page_link));
     if (le != &free_list) {
         p = le2page(le, page_link);
@@ -161,6 +180,7 @@ default_free_pages(struct Page *base, size_t n) {
         }
     }
 
+    //合并后一个空闲block
     le = list_next(&(base->page_link));
     if (le != &free_list) {
         p = le2page(le, page_link);

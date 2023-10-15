@@ -4,7 +4,7 @@
     .section .text,"ax",%progbits
     .globl kern_entry
 kern_entry:
-    # t0 := 三级页表的虚拟地址
+    # t0 := 三级页表的虚拟地址,lui：将32位立即数的32-12位加载到寄存器32-12位，并进行符号扩展。%hi:提取64位中的32-12位
     lui     t0, %hi(boot_page_table_sv39)
     # t1 := 0xffffffff40000000 即虚实映射偏移量
     li      t1, 0xffffffffc0000000 - 0x80000000
@@ -15,7 +15,7 @@ kern_entry:
 
     # t1 := 8 << 60，设置 satp 的 MODE 字段为 Sv39
     li      t1, 8 << 60
-    # 将刚才计算出的预设三级页表物理页号附加到 satp 中
+    # 将刚才计算出的预设三级页表物理页号附加到 satp 中，中间16位不管
     or      t0, t0, t1
     # 将算出的 t0(即新的MODE|页表基址物理页号) 覆盖到 satp 中
     csrw    satp, t0

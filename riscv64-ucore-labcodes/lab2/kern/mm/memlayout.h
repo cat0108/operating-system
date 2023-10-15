@@ -5,7 +5,7 @@
 #define KERNBASE            0xFFFFFFFFC0200000 // = 0x80200000(物理内存里内核的起始位置, KERN_BEGIN_PADDR) + 0xFFFFFFFF40000000(偏移量, PHYSICAL_MEMORY_OFFSET)
 //把原有内存映射到虚拟内存空间的最后一页
 #define KMEMSIZE            0x7E00000          // the maximum amount of physical memory
-// 0x7E00000 = 0x8000000 - 0x200000
+// 0x7E00000 = 0x88000000 - 0x80200000
 // QEMU 缺省的RAM为 0x80000000到0x88000000, 128MiB, 0x80000000到0x80200000被OpenSBI占用
 #define KERNTOP             (KERNBASE + KMEMSIZE) // 0x88000000对应的虚拟地址
 
@@ -60,6 +60,13 @@ typedef struct {
     unsigned int nr_free;           // number of free pages in this free list
 } free_area_t;
 
+#define MAX_BUDDY_ORDER 20
+/* buddy system 的结构体 */
+typedef struct {
+    unsigned int max_order;                           // buddy二叉树的层数
+    list_entry_t free_array[MAX_BUDDY_ORDER + 1];     // 链表数组(现在默认有14层，即2^14 = 16384个可分配物理页)，每个数组元素都一个free_list头
+    unsigned int nr_free;                             // 系统中剩余的空闲块
+} free_buddy_t;
 #endif /* !__ASSEMBLER__ */
 
 #endif /* !__KERN_MM_MEMLAYOUT_H__ */

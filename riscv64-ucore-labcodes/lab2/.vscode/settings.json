@@ -1,0 +1,15 @@
+{
+    "files.associations": {
+        "riscv.h": "c",
+        "mmu.h": "c",
+        "defs.h": "c",
+        "memlayout.h": "c",
+        "stdlib.h": "c",
+        "stdio.h": "c",
+        "pmm.h": "c",
+        "kdebug.h": "c",
+        "kmonitor.h": "c",
+        "list.h": "c",
+        "buddy_pmm.h": "c"
+    }
+}
