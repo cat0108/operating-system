@@ -112,7 +112,7 @@ static inline void print_pgfault(struct trapframe *tf) {
 }
 
 static int pgfault_handler(struct trapframe *tf) {
-    extern struct mm_struct *check_mm_struct;
+    extern struct mm_struct *check_mm_struct;//当前使用的mm_struct指针 
     print_pgfault(tf);
     if (check_mm_struct != NULL) {
         return do_pgfault(check_mm_struct, tf->cause, tf->badvaddr);
@@ -151,6 +151,8 @@ void interrupt_handler(struct trapframe *tf) {
             if (++ticks % TICK_NUM == 0) {
                 print_ticks();
             }
+            if(ticks / TICK_NUM == 10)
+                sbi_shutdown();
             break;
         case IRQ_H_TIMER:
             cprintf("Hypervisor software interrupt\n");

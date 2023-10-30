@@ -89,7 +89,7 @@ vma_create(uintptr_t vm_start, uintptr_t vm_end, uint_t vm_flags) {
 }
 
 
-// find_vma - find a vma  (vma->vm_start <= addr <= vma_vm_end)
+// find_vma - find a vma  (vma->vm_start <= addr < vma_vm_end)
 struct vma_struct *
 find_vma(struct mm_struct *mm, uintptr_t addr) {
     struct vma_struct *vma = NULL;
@@ -110,6 +110,7 @@ find_vma(struct mm_struct *mm, uintptr_t addr) {
                 }
         }
         if (vma != NULL) {
+        //update cache ,用上一次查找到的vma来更新
             mm->mmap_cache = vma;
         }
     }
@@ -130,18 +131,20 @@ check_vma_overlap(struct vma_struct *prev, struct vma_struct *next) {
 void
 insert_vma_struct(struct mm_struct *mm, struct vma_struct *vma) {
     assert(vma->vm_start < vma->vm_end);
+    //从mm的第一个vma_struct出发
     list_entry_t *list = &(mm->mmap_list);
     list_entry_t *le_prev = list, *le_next;
 
         list_entry_t *le = list;
         while ((le = list_next(le)) != list) {
+            //根据list_link确定结构体的位置
             struct vma_struct *mmap_prev = le2vma(le, list_link);
             if (mmap_prev->vm_start > vma->vm_start) {
                 break;
             }
             le_prev = le;
         }
-
+    //找到要插入的前、后结点，再进行覆盖检查，前后vma有无重叠部分
     le_next = list_next(le_prev);
 
     /* check overlap */
@@ -181,6 +184,7 @@ vmm_init(void) {
 // check_vmm - check correctness of vmm
 static void
 check_vmm(void) {
+    //获取当前空闲页数
     size_t nr_free_pages_store = nr_free_pages();
     check_vma_struct();
     check_pgfault();
@@ -201,12 +205,13 @@ check_vma_struct(void) {
     int step1 = 10, step2 = step1 * 10;
 
     int i;
+    //插入完成后，mm所拥有的地址空间范围为[5,5+2)、[10,10+2)、...、[50,50+2)
     for (i = step1; i >= 1; i --) {
         struct vma_struct *vma = vma_create(i * 5, i * 5 + 2, 0);
         assert(vma != NULL);
         insert_vma_struct(mm, vma);
     }
-
+    //插入完成后，mm所拥有的地址空间范围为[55,55+2)、[60,60+2)、...、[500,500+2)
     for (i = step1 + 1; i <= step2; i ++) {
         struct vma_struct *vma = vma_create(i * 5, i * 5 + 2, 0);
         assert(vma != NULL);
@@ -221,7 +226,7 @@ check_vma_struct(void) {
         assert(mmap->vm_start == i * 5 && mmap->vm_end == i * 5 + 2);
         le = list_next(le);
     }
-
+    //根据find_vma函数的定义可知，vma区间集合为左闭又开，因此i+2不会被查到
     for (i = 5; i <= 5 * step2; i +=5) {
         struct vma_struct *vma1 = find_vma(mm, i);
         assert(vma1 != NULL);
@@ -237,7 +242,7 @@ check_vma_struct(void) {
         assert(vma1->vm_start == i  && vma1->vm_end == i  + 2);
         assert(vma2->vm_start == i  && vma2->vm_end == i  + 2);
     }
-
+    //在mm的[0,5]我们没有分配空间，因此查找不到
     for (i =4; i>=0; i--) {
         struct vma_struct *vma_below_5= find_vma(mm,i);
         if (vma_below_5 != NULL ) {
@@ -278,6 +283,7 @@ check_pgfault(void) {
     assert(find_vma(mm, addr) == vma);
 
     int i, sum = 0;
+    //往该地址写数据，触发pgfault
     for (i = 0; i < 100; i ++) {
         *(char *)(addr + i) = i;
         sum += i;
@@ -286,9 +292,9 @@ check_pgfault(void) {
         sum -= *(char *)(addr + i);
     }
     assert(sum == 0);
-
+    //由于page_ref==1，所以此处执行操作后page_ref==0，会释放addr所在的页
     page_remove(pgdir, ROUNDDOWN(addr, PGSIZE));
-
+    //释放为pgdir[0]分配的页
     free_page(pde2page(pgdir[0]));
 
     pgdir[0] = 0;
@@ -297,7 +303,7 @@ check_pgfault(void) {
     mm_destroy(mm);
 
     check_mm_struct = NULL;
-    nr_free_pages_store--;	// szx : Sv39第二级页表多占了一个内存页，所以执行此操作
+    nr_free_pages_store--;	// Sv39第二级页表多占了一个内存页，而没有释放二级页表freepage，所以执行此操作
 
     assert(nr_free_pages_store == nr_free_pages());
 
@@ -329,6 +335,7 @@ volatile unsigned int pgfault_num=0;
  */
 int
 do_pgfault(struct mm_struct *mm, uint_t error_code, uintptr_t addr) {
+    //检查非法参数
     int ret = -E_INVAL;
     //try to find a vma which include addr
     struct vma_struct *vma = find_vma(mm, addr);
@@ -377,12 +384,17 @@ do_pgfault(struct mm_struct *mm, uint_t error_code, uintptr_t addr) {
     ptep = get_pte(mm->pgdir, addr, 1);  //(1) try to find a pte, if pte's
                                          //PT(Page Table) isn't existed, then
                                          //create a PT.
-    if (*ptep == 0) {
-        if (pgdir_alloc_page(mm->pgdir, addr, perm) == NULL) {
+    if (*ptep == 0) 
+    {
+        //当前页表项没有被占用，分配页并建立映射关系
+        if (pgdir_alloc_page(mm->pgdir, addr, perm) == NULL) 
+        {
             cprintf("pgdir_alloc_page in do_pgfault failed\n");
             goto failed;
         }
-    } else {
+    } 
+    else 
+    {//当前页已被占用，需要从磁盘中换入
         /*LAB3 EXERCISE 3: YOUR CODE
         * 请你根据以下信息提示，补充函数
         * 现在我们认为pte是一个交换条目，那我们应该从磁盘加载数据并放到带有phy addr的页面，
@@ -401,11 +413,14 @@ do_pgfault(struct mm_struct *mm, uint_t error_code, uintptr_t addr) {
             //(1）According to the mm AND addr, try
             //to load the content of right disk page
             //into the memory which page managed.
+            swap_in(mm,addr,&page);
             //(2) According to the mm,
             //addr AND page, setup the
             //map of phy addr <--->
             //logical addr
+            page_insert(mm->pgdir,page,addr,perm);
             //(3) make the page swappable.
+            swap_map_swappable(mm,addr,page,1);
             page->pra_vaddr = addr;
         } else {
             cprintf("no swap_init_ok but ptep is %x, failed\n", *ptep);

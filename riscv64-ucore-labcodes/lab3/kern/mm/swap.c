@@ -2,6 +2,7 @@
 #include <swapfs.h>
 #include <swap_fifo.h>
 #include <swap_clock.h>
+#include <swap_lru.h>
 #include <stdio.h>
 #include <string.h>
 #include <memlayout.h>
@@ -39,11 +40,12 @@ swap_init(void)
         panic("bad max_swap_offset %08x.\n", max_swap_offset);
      }
 
-     sm = &swap_manager_clock;//use first in first out Page Replacement Algorithm
+     sm = &swap_manager_fifo;//use first in first out Page Replacement Algorithm
      int r = sm->init();
      
      if (r == 0)
      {
+          //初始化成功，设置swap_init_ok为1
           swap_init_ok = 1;
           cprintf("SWAP: manager = %s\n", sm->name);
           check_swap();
@@ -88,6 +90,7 @@ swap_out(struct mm_struct *mm, int n, int in_tick)
           //struct Page **ptr_page=NULL;
           struct Page *page;
           // cprintf("i %d, SWAP: call swap_out_victim\n",i);
+          //找到要换出的物理页面，存在page中
           int r = sm->swap_out_victim(mm, &page, in_tick);
           if (r != 0) {
                     cprintf("i %d, swap_out: call swap_out_victim failed\n",i);
@@ -97,17 +100,20 @@ swap_out(struct mm_struct *mm, int n, int in_tick)
 
           //cprintf("SWAP: choose victim page 0x%08x\n", page);
           
-          v=page->pra_vaddr; 
-          pte_t *ptep = get_pte(mm->pgdir, v, 0);
+          v=page->pra_vaddr; //获取物理页面对应的虚拟地址
+          pte_t *ptep = get_pte(mm->pgdir, v, 0);//找到该虚拟内存所对应的页表项
           assert((*ptep & PTE_V) != 0);
-
+          //将换出的页面写入磁盘交换区。
           if (swapfs_write( (page->pra_vaddr/PGSIZE+1)<<8, page) != 0) {
+          //换出失败,重新加载到内存中
                     cprintf("SWAP: failed to save\n");
                     sm->map_swappable(mm, v, page, 0);
                     continue;
           }
           else {
+          //换出成功
                     cprintf("swap_out: i %d, store page in vaddr 0x%x to disk swap entry %d\n", i, v, page->pra_vaddr/PGSIZE+1);
+                    //将存在磁盘的位置信息写入页表项中
                     *ptep = (page->pra_vaddr/PGSIZE+1)<<8;
                     free_page(page);
           }
@@ -123,10 +129,17 @@ swap_in(struct mm_struct *mm, uintptr_t addr, struct Page **ptr_result)
      struct Page *result = alloc_page();
      assert(result!=NULL);
 
-     pte_t *ptep = get_pte(mm->pgdir, addr, 0);
      // cprintf("SWAP: load ptep %x swap entry %d to vaddr 0x%08x, page %x, No %d\n", ptep, (*ptep)>>8, addr, result, (result-pages));
+     pte_t *ptep = get_pte(mm->pgdir, addr, 0);
     
      int r;
+     /*
+      *POINT：
+      *在这里使用了投机取巧的办法，将pte的值从第八位开始作为磁盘交换区的页号
+      *这样就可以直接通过pte的值来找到对应的磁盘交换区的页号
+      *最低8位用作标志位
+      *根据*ptep找到磁盘中的对应页并读取到result中
+     */
      if ((r = swapfs_read((*ptep), result)) != 0)
      {
         assert(r!=0);
@@ -184,12 +197,14 @@ check_swap(void)
      while ((le = list_next(le)) != &free_list) {
         struct Page *p = le2page(le, page_link);
         assert(PageProperty(p));
+        cprintf("count=%d, total=%d, p->property=%d\n", count, total, p->property);
         count ++, total += p->property;
      }
      assert(total == nr_free_pages());
      cprintf("BEGIN check_swap: count %d, total %d\n",count,total);
      
      //now we set the phy pages env     
+     //此时分配了1页
      struct mm_struct *mm = mm_create();
      assert(mm != NULL);
 
@@ -200,7 +215,7 @@ check_swap(void)
 
      pde_t *pgdir = mm->pgdir = boot_pgdir;
      assert(pgdir[0] == 0);
-
+     //分配走了第二页
      struct vma_struct *vma = vma_create(BEING_CHECK_VALID_VADDR, CHECK_VALID_VADDR, VM_WRITE | VM_READ);
      assert(vma != NULL);
 
@@ -209,10 +224,11 @@ check_swap(void)
      //setup the temp Page Table vaddr 0~4MB
      cprintf("setup Page Table for vaddr 0X1000, so alloc a page\n");
      pte_t *temp_ptep=NULL;
+     //在这里为了找到(创建)对应的pte，又分配了两页
      temp_ptep = get_pte(mm->pgdir, BEING_CHECK_VALID_VADDR, 1);
      assert(temp_ptep!= NULL);
      cprintf("setup Page Table vaddr 0~4MB OVER!\n");
-     
+     //分配了4页
      for (i=0;i<CHECK_VALID_PHY_PAGE_NUM;i++) {
           check_rp[i] = alloc_page();
           assert(check_rp[i] != NULL );
@@ -226,6 +242,7 @@ check_swap(void)
      
      unsigned int nr_free_store = nr_free;
      nr_free = 0;
+     //使得free_list有4页
      for (i=0;i<CHECK_VALID_PHY_PAGE_NUM;i++) {
         free_pages(check_rp[i],1);
      }
@@ -236,7 +253,7 @@ check_swap(void)
 
      
      pgfault_num=0;
-     
+     //引用一些页触发缺页异常
      check_content_set();
      assert( nr_free == 0);         
      for(i = 0; i<MAX_SEQ_NO ; i++) 
@@ -244,6 +261,7 @@ check_swap(void)
      
      for (i= 0;i<CHECK_VALID_PHY_PAGE_NUM;i++) {
          check_ptep[i]=0;
+         //在之前的缺页异常中已经分配好了相应页表项
          check_ptep[i] = get_pte(pgdir, (i+1)*0x1000, 0);
          //cprintf("i %d, check_ptep addr %x, value %x\n", i, check_ptep[i], *check_ptep[i]);
          assert(check_ptep[i] != NULL);
@@ -271,6 +289,7 @@ check_swap(void)
      le = &free_list;
      while ((le = list_next(le)) != &free_list) {
          struct Page *p = le2page(le, page_link);
+          cprintf("count=%d, total=%d, p->property=%d\n", count, total, p->property);
          count --, total -= p->property;
      }
      cprintf("count is %d, total is %d\n",count,total);

@@ -18,7 +18,7 @@ struct vma_struct {
     uint_t vm_flags;       // flags of vma
     list_entry_t list_link;  // linear list link which sorted by start addr of vma
 };
-
+//通过对象返回结构体vma_struct的指针
 #define le2vma(le, member)                  \
     to_struct((le), struct vma_struct, member)
 
@@ -28,8 +28,9 @@ struct vma_struct {
 
 // the control struct for a set of vma using the same PDT
 struct mm_struct {
-    list_entry_t mmap_list;        // linear list link which sorted by start addr of vma
-    struct vma_struct *mmap_cache; // current accessed vma, used for speed purpose
+
+    list_entry_t mmap_list;        // linear list link which sorted by start addr of vma,这个结构体中第一个vma_struct的位置
+    struct vma_struct *mmap_cache; // current accessed vma, used for speed purpose，在vma_find中用于加速查找
     pde_t *pgdir;                  // the PDT of these vma
     int map_count;                 // the count of these vma
     void *sm_priv;                   // the private data for swap manager
