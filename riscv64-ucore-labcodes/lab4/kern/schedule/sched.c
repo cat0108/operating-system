@@ -18,6 +18,7 @@ schedule(void) {
     local_intr_save(intr_flag);
     {
         current->need_resched = 0;
+        //注意idlepro不在proc_list里面
         last = (current == idleproc) ? &proc_list : &(current->list_link);
         le = last;
         do {

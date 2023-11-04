@@ -40,7 +40,7 @@
 #define PHYSICAL_MEMORY_END 0x88000000
 
 
-#define KSTACKPAGE          2                           // # of pages in kernel stack
+#define KSTACKPAGE          2                           // /# of pages in kernel stack
 #define KSTACKSIZE          (KSTACKPAGE * PGSIZE)       // sizeof kernel stack
 
 #ifndef __ASSEMBLER__
