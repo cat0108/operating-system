@@ -142,6 +142,8 @@ get_pid(void) {
     static_assert(MAX_PID > MAX_PROCESS);
     struct proc_struct *proc;
     list_entry_t *list = &proc_list, *le;
+    //static变量保证不会被重新初始化
+    
     static int next_safe = MAX_PID, last_pid = MAX_PID;
     if (++ last_pid >= MAX_PID) {
         last_pid = 1;
@@ -152,6 +154,7 @@ get_pid(void) {
         next_safe = MAX_PID;
     repeat:
         le = list;
+        //检查要分配的pid是否和已有的进程的pid冲突
         while ((le = list_next(le)) != list) {
             proc = le2proc(le, list_link);
             if (proc->pid == last_pid) {
@@ -196,6 +199,7 @@ proc_run(struct proc_struct *proc) {
             //切换到新进程
             switch_to(&(pre->context),&(proc->context));
         }
+        local_intr_restore(intr_flag);
     }
 }
 
@@ -243,11 +247,12 @@ kernel_thread(int (*fn)(void *), void *arg, uint32_t clone_flags) {
     //首先将sstatus的值读出来，然后将SSTATUS_SPP和SSTATUS_SPIE位置1，SSTATUS_SIE位置0
     //将进入中断前的状态(SPP)设为S态，进入S态前的中断使能状态设为1，当前的中断使能状态为0
     tf.status = (read_csr(sstatus) | SSTATUS_SPP | SSTATUS_SPIE) & ~SSTATUS_SIE;
-    //将中断(入口)返回设置为kernel_thread_entry
+    //将中断(入口)返回的地方设置为kernel_thread_entry
     tf.epc = (uintptr_t)kernel_thread_entry;
     //调用do_fork函数，创建一个新的进程
     return do_fork(clone_flags | CLONE_VM, 0, &tf);
 }
+
 
 // setup_kstack - alloc pages with size KSTACKPAGE as process kernel stack
 static int
@@ -279,14 +284,18 @@ copy_mm(uint32_t clone_flags, struct proc_struct *proc) {
 //             - setup the kernel entry point and stack of process
 static void
 copy_thread(struct proc_struct *proc, uintptr_t esp, struct trapframe *tf) {
+    //在内核栈上分配空间保存tf
     proc->tf = (struct trapframe *)(proc->kstack + KSTACKSIZE - sizeof(struct trapframe));
+    //再同时将proc->tf的值设置为tf
     *(proc->tf) = *tf;
 
     // Set a0 to 0 so a child process knows it's just forked
     proc->tf->gpr.a0 = 0;
+    //若是内核进程，则指向内核栈的栈顶，即tf的位置
     proc->tf->gpr.sp = (esp == 0) ? (uintptr_t)proc->tf : esp;
-
+    //将ra设置为forkret
     proc->context.ra = (uintptr_t)forkret;
+    //将tf放到上下文的栈顶
     proc->context.sp = (uintptr_t)(proc->tf);
 }
 
@@ -326,11 +335,11 @@ do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf) {
         goto fork_out;
     }
     //    2. call setup_kstack to allocate a kernel stack for child process
-    if(setup_kstack(proc)){
+    if(setup_kstack(proc)!=0){
         goto bad_fork_cleanup_kstack;
     }
     //    3. call copy_mm to dup OR share mm according clone_flag
-    if(copy_mm(clone_flags,proc)){
+    if(copy_mm(clone_flags,proc)!=0){
         goto bad_fork_cleanup_proc;
     }
     //    4. call copy_thread to setup tf & context in proc_struct

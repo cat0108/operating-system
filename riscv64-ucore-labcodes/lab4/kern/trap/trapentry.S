@@ -111,6 +111,6 @@ __trapret:
  
     .globl forkrets
 forkrets:
-    # set stack to this new process's trapframe
-    move sp, a0
+    # set stack to this new process's trapframe,该函数定义在proc.c中，参数为current->tf
+    move sp, a0    
     j __trapret
